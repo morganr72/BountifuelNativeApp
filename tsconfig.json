@@ -1,3 +1,12 @@
 {
-  "extends": "@react-native/typescript-config"
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    /* Visit https://aka.ms/tsconfig.json to read more about this file */
+
+    /* ADD THIS LINE to enable absolute imports from the `src` folder */
+    "baseUrl": "src",
+
+    /* Completeness */
+    "skipLibCheck": true
+  }
 }
