@@ -4,11 +4,13 @@
  * A complex SVG-based gauge component for displaying temperature readings.
  */
 import React from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import { Svg, Path, G, Defs, LinearGradient, Stop, RadialGradient } from 'react-native-svg';
+// UPDATED: Import useWindowDimensions
+import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
+import { Svg, Path, G, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { COLORS } from '../../constants/colors';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// REMOVED: Static screen width is no longer used
+// const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type GaugeProps = {
   value: number;
@@ -18,10 +20,15 @@ type GaugeProps = {
   highThreshold: number;
   label: string;
   Icon: React.FC<any>; // Icon component from lucide-react-native
+  size?: number; // ADDED: Optional size prop
 };
 
-export const Gauge: React.FC<GaugeProps> = ({ value, min, max, lowThreshold, highThreshold, label, Icon }) => {
-  const size = SCREEN_WIDTH * 0.7;
+export const Gauge: React.FC<GaugeProps> = ({ value, min, max, lowThreshold, highThreshold, label, Icon, size: propSize }) => {
+  // UPDATED: Get screen width dynamically
+  const { width: screenWidth } = useWindowDimensions();
+  // Use the passed size prop, or calculate a default based on the current screen width
+  const size = propSize || screenWidth * 0.7;
+
   const strokeWidth = 25;
   const center = size / 2;
   const radius = center - strokeWidth / 2;

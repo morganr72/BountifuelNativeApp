@@ -1,7 +1,5 @@
 /**
- * =================================================================
- * IMPORTANT: This file should be saved at `src/screens/DashBoardScreen.tsx`
- * =================================================================
+ * src/screens/DashBoardScreen.tsx
  *
  * The main dashboard screen of the application.
  * Features a swipeable view for Heating and Water dashboards.
@@ -9,23 +7,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Dimensions, ActivityIndicator
+  // UPDATED: Import useWindowDimensions
+  useWindowDimensions, ActivityIndicator
 } from 'react-native';
 import { Svg, Rect, Defs, RadialGradient, Stop } from 'react-native-svg';
 import RNLinearGradient from 'react-native-linear-gradient';
 import { Home, Droplet, AlertCircle, Loader } from 'lucide-react-native';
 import { getCurrentUser } from 'aws-amplify/auth';
 
-// UPDATED: Using absolute paths for more reliable module resolution
 import { COLORS } from 'constants/colors';
 import type { AppTabScreenProps } from 'navigation/types';
 import { FlameIcon, WaterDropletIcon } from 'components/CustomIcons';
 import { Gauge } from 'components/dashboard/Gauge';
 import { GlassCard } from 'components/dashboard/GlassCard';
 import { StatusDisplay } from 'components/dashboard/StatusDisplay';
-import { fetchWithAuth } from 'api/fetchWithAuth';
+import { fetchWithAuth } from 'api/fetchwithAuth';
+import { useOrientation } from 'hooks/useOrientation';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// REMOVED: Static screen width is no longer used
+// const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Define types for the dashboard's data
 type RunningStatus = { gas: 'heating' | 'water' | 'none'; hp: 'heating' | 'water' | 'none'; };
@@ -41,6 +41,10 @@ type DashboardData = {
 };
 
 const DashboardScreen: React.FC<AppTabScreenProps<'Dashboard'>> = ({ navigation, route }) => {
+  useOrientation('PORTRAIT');
+  // UPDATED: Get screen width dynamically using the hook
+  const { width: screenWidth } = useWindowDimensions();
+
   const [activePage, setActivePage] = useState<'heating' | 'water'>('heating');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
@@ -95,16 +99,13 @@ const DashboardScreen: React.FC<AppTabScreenProps<'Dashboard'>> = ({ navigation,
   const handleBoost = async (boostTypeToSet: 'H' | 'W') => {
     if (isBoosting || !dashboardData) return;
     setIsBoosting(true);
-    // If the selected boost is already active, send 'C' to cancel it.
     const heatWaterValue = dashboardData.boostType === boostTypeToSet ? 'C' : boostTypeToSet;
     try {
       await fetchWithAuth('https://3gtpvcw888.execute-api.eu-west-2.amazonaws.com/default/BoostAppAPIv2', {
         method: 'POST',
         body: JSON.stringify({ heatwater: heatWaterValue })
       });
-      // Optimistically update the UI
       setDashboardData(prev => prev ? ({ ...prev, boostType: heatWaterValue === 'C' ? 'N' : heatWaterValue }) : null);
-      // Re-fetch data after a short delay to confirm the state
       setTimeout(() => {
         fetchData().finally(() => setIsBoosting(false));
       }, 1500);
@@ -136,9 +137,11 @@ const DashboardScreen: React.FC<AppTabScreenProps<'Dashboard'>> = ({ navigation,
     const HeatingDashboard = () => {
       const isBoostActive = dashboardData.boostType === 'H';
       return (
-        <View style={styles.page}>
+        // UPDATED: Use dynamic screen width for the page layout
+        <View style={[styles.page, { width: screenWidth }]}>
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Gauge value={dashboardData.roomTemperature} min={16} max={25} lowThreshold={dashboardData.destTempLow} highThreshold={dashboardData.destTempHigh} label="ROOM TEMPERATURE" Icon={Home} />
+            {/* UPDATED: Pass the dynamic size to the Gauge component */}
+            <Gauge value={dashboardData.roomTemperature} min={16} max={25} lowThreshold={dashboardData.destTempLow} highThreshold={dashboardData.destTempHigh} label="ROOM TEMPERATURE" Icon={Home} size={screenWidth * 0.7} />
             <View style={styles.infoRow}>
               <GlassCard><Text style={styles.cardTitle}>Weekly Savings</Text><Text style={styles.cardValue}>£{dashboardData.weeklySavings.toFixed(2)}</Text></GlassCard>
               <GlassCard><Text style={styles.cardTitle}>Status</Text><StatusDisplay status={dashboardData.running_status} /></GlassCard>
@@ -160,9 +163,11 @@ const DashboardScreen: React.FC<AppTabScreenProps<'Dashboard'>> = ({ navigation,
     const WaterStatusPage = () => {
       const isBoostActive = dashboardData.boostType === 'W';
       return (
-        <View style={styles.page}>
+        // UPDATED: Use dynamic screen width for the page layout
+        <View style={[styles.page, { width: screenWidth }]}>
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Gauge value={dashboardData.waterTemperature} min={30} max={65} lowThreshold={45} highThreshold={55} label="WATER TEMPERATURE" Icon={Droplet} />
+            {/* UPDATED: Pass the dynamic size to the Gauge component */}
+            <Gauge value={dashboardData.waterTemperature} min={30} max={65} lowThreshold={45} highThreshold={55} label="WATER TEMPERATURE" Icon={Droplet} size={screenWidth * 0.7} />
             <View style={styles.infoRow}>
               <GlassCard><Text style={styles.cardTitle}>Tank Level</Text><Text style={styles.cardValue}>75%</Text></GlassCard>
               <GlassCard><Text style={styles.cardTitle}>Status</Text><StatusDisplay status={dashboardData.running_status} /></GlassCard>
@@ -183,7 +188,14 @@ const DashboardScreen: React.FC<AppTabScreenProps<'Dashboard'>> = ({ navigation,
 
     return (
       <>
-        <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} onScroll={(event) => { const pageIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH); setActivePage(pageIndex === 0 ? 'heating' : 'water'); }} scrollEventThrottle={200}>
+        <ScrollView 
+            horizontal 
+            pagingEnabled 
+            showsHorizontalScrollIndicator={false} 
+            // UPDATED: Use dynamic screen width for scroll calculation
+            onScroll={(event) => { const pageIndex = Math.round(event.nativeEvent.contentOffset.x / screenWidth); setActivePage(pageIndex === 0 ? 'heating' : 'water'); }} 
+            scrollEventThrottle={200}
+        >
           <HeatingDashboard />
           <WaterStatusPage />
         </ScrollView>
@@ -220,7 +232,8 @@ const DashboardScreen: React.FC<AppTabScreenProps<'Dashboard'>> = ({ navigation,
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: COLORS.background },
-    page: { width: SCREEN_WIDTH, flex: 1 },
+    // UPDATED: Removed static width from page style
+    page: { flex: 1 },
     scrollContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
     header: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10 },
     greeting: { color: COLORS.text, fontSize: 28, fontWeight: 'bold' },

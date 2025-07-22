@@ -2,33 +2,39 @@
  * App.tsx
  *
  * The main entry point for the React Native application.
- * It configures AWS Amplify and renders the main AppNavigator.
  */
 import React from 'react';
-import { StatusBar } from 'react-native';
-import { Amplify } from 'aws-amplify';
-import { withAuthenticator } from '@aws-amplify/ui-react-native';
+import { StatusBar, StyleSheet } from 'react-native';
+import { Authenticator } from '@aws-amplify/ui-react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { AppNavigator } from './src/navigation/AppNavigator';
+import AppNavigator from './src/navigation/AppNavigator';
 
-// AWS Amplify Configuration from your original file
-Amplify.configure({
-  Auth: {
-    Cognito: {
-      userPoolId: 'eu-west-2_SpWEM2H2M',
-      userPoolClientId: '7kde18g8ga9gr9hpck0llqfrll',
-    }
-  }
-});
-
-function App() {
+const AppContent = () => {
   return (
     <>
       <StatusBar barStyle="light-content" />
       <AppNavigator />
     </>
   );
+};
+
+function App() {
+  return (
+    <GestureHandlerRootView style={styles.container}>
+      <Authenticator.Provider>
+        <Authenticator>
+          <AppContent />
+        </Authenticator>
+      </Authenticator.Provider>
+    </GestureHandlerRootView>
+  );
 }
 
-// Wrap the app with the Amplify Authenticator HOC
-export default withAuthenticator(App);
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});
+
+export default App;

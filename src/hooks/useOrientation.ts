@@ -20,10 +20,12 @@ export const useOrientation = (orientation: OrientationType) => {
         Orientation.lockToPortrait();
       }
 
-      // When the screen goes out of focus, unlock to allow other screens to set their own orientation
-      return () => {
-        Orientation.unlockAllOrientations();
-      };
+      // --- FIXED: Removed the cleanup function ---
+      // By removing the unlock call, the orientation set by a screen
+      // will persist until another screen actively changes it. This is more stable.
+      // return () => {
+      //   Orientation.unlockAllOrientations();
+      // };
     }, [orientation])
   );
 };
