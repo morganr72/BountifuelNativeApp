@@ -1,22 +1,22 @@
 /**
  * src/screens/ProfilesScreen.tsx
  *
- * Fetches and displays a draggable list of temperature profiles.
+ * --- UPDATE: Centralized API endpoint usage. ---
+ * --- NOTE: Retained double JSON.parse as a workaround for a faulty API. ---
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-// --- UPDATED: Import useFocusEffect ---
+import React, { useState, useCallback, useRef } from 'react';
+import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Svg, Rect } from 'react-native-svg';
-import { BarChart2, GripVertical, CheckCircle } from 'lucide-react-native';
+import { BarChart2, GripVertical, CheckCircle, WifiOff } from 'lucide-react-native';
 
-import { COLORS } from 'constants/colors';
-import type { SettingsStackScreenProps, Profile, HalfHourlyRecord } from 'navigation/types';
-import { fetchWithAuth } from 'api/fetchwithAuth';
-import { useOrientation } from 'hooks/useOrientation';
-
-// --- Reusable Components ---
+import { COLORS } from '../constants/colors';
+import { API_ENDPOINTS } from '../config/api';
+import type { SettingsStackScreenProps, Profile, HalfHourlyRecord } from '../navigation/types';
+import { fetchWithAuth } from '../api/fetchwithAuth';
+import { useOrientation } from '../hooks/useOrientation';
+import { usePremise } from '../context/PremiseContext';
 
 const TempRangeBadge: React.FC<{ records: HalfHourlyRecord[] }> = ({ records }) => {
   if (!records || records.length === 0) {
@@ -59,7 +59,7 @@ const ThumbnailChart: React.FC<{ records: HalfHourlyRecord[] }> = ({ records }) 
                 {records.map((record, index) => {
                     const low = Number(record.LowTemp);
                     const high = Number(record.HighTemp);
-                    const x = (index / 48) * 100; // Position as a percentage
+                    const x = (index / 48) * 100;
                     const barWidth = 100 / 48;
                     
                     const y = ((yDomain[1] - high) / yRange) * 100;
@@ -81,11 +81,10 @@ const ThumbnailChart: React.FC<{ records: HalfHourlyRecord[] }> = ({ records }) 
     );
 };
 
-
-// --- Main Screen Component ---
-
 const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ navigation }) => {
   useOrientation('PORTRAIT');
+  const { currentPremise } = usePremise();
+
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [defaultProfile, setDefaultProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,24 +94,24 @@ const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ naviga
   const originalOrderRef = useRef<string[]>([]);
 
   const fetchData = useCallback(async () => {
-    // Set loading to true only if it's the initial fetch
-    if (profiles.length === 0) setIsLoading(true);
+    if (!currentPremise) {
+        setError("No premise selected.");
+        setIsLoading(false);
+        return;
+    }
+    setIsLoading(true);
     setError(null);
     try {
-      const response = await fetchWithAuth('https://wt999xvbu1.execute-api.eu-west-2.amazonaws.com/default/TempProfileDisplayAPIv2');
+      const url = `${API_ENDPOINTS.getTempProfiles}?controllerId=${currentPremise.Controller}`;
+      const response = await fetchWithAuth(url);
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
       const data = await response.json();
+      
+      // NOTE: This API incorrectly returns the body as a stringified JSON.
+      // This double parse is a necessary workaround for the backend issue.
       const profilesData = (typeof data.body === 'string') ? JSON.parse(data.body) : data;
 
-      const transformedProfiles = Object.entries(profilesData).map(([key, value]: [string, any]) => ({
-        ...value,
-        ProfileKey: key,
-        HalfHourlyRecords: Array.isArray(value.HalfHourlyRecords) ? value.HalfHourlyRecords.map((r: any) => ({
-          FromTime: r.FromTime,
-          LowTemp: r.TempDemandLow,
-          HighTemp: r.TempDemandHigh
-        })) : [],
-      }));
+      const transformedProfiles: Profile[] = Object.values(profilesData);
 
       const defProf = transformedProfiles.find(p => p.PriorityName?.includes('Default')) || null;
       const otherProfs = transformedProfiles
@@ -126,20 +125,20 @@ const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ naviga
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentPremise]);
 
-  // --- UPDATED: Use useFocusEffect to refetch data when the screen is focused ---
-  useFocusEffect(
-    useCallback(() => {
-      fetchData();
-    }, [fetchData])
-  );
+  useFocusEffect(useCallback(() => { fetchData(); }, [fetchData]));
 
   const savePriority = async (reorderedProfiles: Profile[]) => {
+    if (!currentPremise) {
+        Alert.alert("Error", "No premise selected.");
+        return;
+    }
     setIsSaving(true);
     setError(null);
     setSaveSuccess(false);
     const payload = {
+      controllerId: currentPremise.Controller,
       profiles: reorderedProfiles.map((p, i) => ({
         profileKey: p.ProfileKey,
         profileName: p.PriorityName,
@@ -147,7 +146,7 @@ const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ naviga
       }))
     };
     try {
-      const response = await fetchWithAuth('https://anp440nimj.execute-api.eu-west-2.amazonaws.com/default/TempProfilePriorityUpdateAPIv2', {
+      const response = await fetchWithAuth(API_ENDPOINTS.updateTempProfilePriority, {
         method: 'POST',
         body: JSON.stringify(payload)
       });
@@ -162,23 +161,25 @@ const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ naviga
   };
 
   const renderItem = ({ item, drag, isActive }: RenderItemParams<Profile>) => (
-    <View style={[styles.row, { backgroundColor: isActive ? COLORS.accent : COLORS.card }]}>
-      <TouchableOpacity onLongPress={drag} disabled={isActive} style={styles.dragHandle}>
-        <GripVertical color={COLORS.textSecondary} size={24} />
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={styles.rowContent}
-        onPress={() => navigation.navigate('ProfileDetail', { profile: item, isNew: false })}
-        disabled={isActive}
-      >
-        <View style={styles.textContainer}>
-          <Text style={styles.rowTitle}>{item.PriorityName}</Text>
+    <ScaleDecorator>
+        <View style={[styles.row, { backgroundColor: isActive ? COLORS.accent : COLORS.card }]}>
+        <TouchableOpacity onLongPress={drag} disabled={isActive} style={styles.dragHandle}>
+            <GripVertical color={COLORS.textSecondary} size={24} />
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+            style={styles.rowContent}
+            onPress={() => navigation.navigate('ProfileDetail', { profile: item, isNew: false })}
+            disabled={isActive}
+        >
+            <View style={styles.textContainer}>
+            <Text style={styles.rowTitle}>{item.PriorityName}</Text>
+            </View>
+            <TempRangeBadge records={item.HalfHourlyRecords} />
+            <ThumbnailChart records={item.HalfHourlyRecords} />
+        </TouchableOpacity>
         </View>
-        <TempRangeBadge records={item.HalfHourlyRecords} />
-        <ThumbnailChart records={item.HalfHourlyRecords} />
-      </TouchableOpacity>
-    </View>
+    </ScaleDecorator>
   );
 
   const renderContent = () => {
@@ -186,7 +187,7 @@ const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ naviga
       return <View style={styles.centered}><ActivityIndicator size="large" color={COLORS.cyan} /></View>;
     }
     if (error) {
-        return <View style={styles.centered}><Text style={styles.errorText}>Error: {error}</Text></View>;
+        return <View style={styles.centered}><WifiOff size={48} color={COLORS.red} /><Text style={styles.errorText}>Error: {error}</Text><TouchableOpacity style={styles.retryButton} onPress={fetchData}><Text style={styles.retryButtonText}>Retry</Text></TouchableOpacity></View>;
     }
     return (
       <>
@@ -224,13 +225,15 @@ const ProfilesScreen: React.FC<SettingsStackScreenProps<'Profiles'>> = ({ naviga
                 <TouchableOpacity style={styles.row} 
                   onPress={() => navigation.navigate('ProfileDetail', { profile: defaultProfile, isNew: false })}
                 >
-                    <BarChart2 color={COLORS.textSecondary} size={24} />
-                    <View style={styles.textContainer}>
-                        <Text style={styles.rowTitle}>{defaultProfile.PriorityName}</Text>
-                        <Text style={styles.rowSubtitle}>(Locked)</Text>
+                    <View style={styles.dragHandle}><BarChart2 color={COLORS.textSecondary} size={24} /></View>
+                    <View style={styles.rowContent}>
+                        <View style={styles.textContainer}>
+                            <Text style={styles.rowTitle}>{defaultProfile.PriorityName}</Text>
+                            <Text style={styles.rowSubtitle}>(Locked)</Text>
+                        </View>
+                        <TempRangeBadge records={defaultProfile.HalfHourlyRecords} />
+                        <ThumbnailChart records={defaultProfile.HalfHourlyRecords} />
                     </View>
-                    <TempRangeBadge records={defaultProfile.HalfHourlyRecords} />
-                    <ThumbnailChart records={defaultProfile.HalfHourlyRecords} />
                 </TouchableOpacity>
               </View>
             ) : null
@@ -254,7 +257,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   title: { fontSize: 28, fontWeight: 'bold', color: COLORS.text, textAlign: 'center', marginBottom: 4 },
   headerSubtitle: { textAlign: 'center', color: COLORS.textSecondary, marginBottom: 16 },
-  newButton: { backgroundColor: COLORS.cyan, paddingVertical: 12, borderRadius: 25, alignItems: 'center', marginBottom: 20 },
+  newButton: { backgroundColor: COLORS.green, paddingVertical: 12, borderRadius: 25, alignItems: 'center', marginBottom: 20 },
   newButtonText: { color: COLORS.text, fontWeight: 'bold', fontSize: 16 },
   row: { 
     flexDirection: 'row', 
@@ -287,7 +290,9 @@ const styles = StyleSheet.create({
   badgeDivider: { height: 1, width: '60%', backgroundColor: 'rgba(255,255,255,0.2)', marginVertical: 2 },
   chartContainer: { width: 120, height: 60, justifyContent: 'center', alignItems: 'center' },
   defaultHeader: { color: COLORS.textSecondary, fontSize: 16, fontWeight: 'bold', marginBottom: 8, marginLeft: 4 },
-  errorText: { color: COLORS.red, textAlign: 'center', fontSize: 16 },
+  errorText: { color: COLORS.red, textAlign: 'center', fontSize: 16, marginBottom: 16 },
+  retryButton: { backgroundColor: COLORS.cyan, paddingVertical: 10, paddingHorizontal: 30, borderRadius: 20 },
+  retryButtonText: { color: COLORS.text, fontSize: 16, fontWeight: 'bold' },
   successMessage: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(46, 213, 115, 0.15)', padding: 10, borderRadius: 8, marginBottom: 10 },
   successText: { color: COLORS.green, marginLeft: 8, fontWeight: 'bold' },
 });

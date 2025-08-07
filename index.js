@@ -2,13 +2,17 @@
  * @format
  */
 
-// ADDED: This import is required for react-native-gesture-handler.
-// It must be the very first line of your entry file.
+// --- CORRECT IMPORT ORDER ---
+// react-native-gesture-handler must be the very first import.
 import 'react-native-gesture-handler';
 
+// The crypto polyfill for the `uuid` library must come next.
+import 'react-native-get-random-values';
+
+// Your existing imports and configuration follow.
 import {AppRegistry} from 'react-native';
 import { Amplify } from 'aws-amplify';
-import App from './App';
+import App from './App'; // Assuming './App.tsx' is correct
 import {name as appName} from './app.json';
 
 // Configure Amplify here, at the very root of the application.

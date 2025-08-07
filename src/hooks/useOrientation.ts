@@ -2,7 +2,10 @@
  * src/hooks/useOrientation.ts
  *
  * A custom React hook to lock the screen orientation when a component is focused.
- * It automatically unlocks the orientation when the component is unfocused.
+ *
+ * --- FIX: Removed the cleanup function to prevent a race condition. ---
+ * The cleanup (unlocking) is now handled manually by screens that need it
+ * to avoid the new screen's lock being cancelled by the old screen's unlock.
  */
 import { useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,13 +22,8 @@ export const useOrientation = (orientation: OrientationType) => {
       } else {
         Orientation.lockToPortrait();
       }
-
-      // --- FIXED: Removed the cleanup function ---
-      // By removing the unlock call, the orientation set by a screen
-      // will persist until another screen actively changes it. This is more stable.
-      // return () => {
-      //   Orientation.unlockAllOrientations();
-      // };
+      // NOTE: The cleanup function is intentionally removed.
+      // return () => { Orientation.unlockAllOrientations(); };
     }, [orientation])
   );
 };

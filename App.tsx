@@ -1,33 +1,31 @@
 /**
  * App.tsx
- *
- * The main entry point for the React Native application.
+ * --- UPDATED to include the new UserProvider for setup status checking.
  */
 import React from 'react';
 import { StatusBar, StyleSheet } from 'react-native';
 import { Authenticator } from '@aws-amplify/ui-react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import AppNavigator from './src/navigation/AppNavigator';
-
-const AppContent = () => {
-  return (
-    <>
-      <StatusBar barStyle="light-content" />
-      <AppNavigator />
-    </>
-  );
-};
+import { PremiseProvider } from './src/context/PremiseContext';
+import { UserProvider } from './src/context/UserContext'; // Import the new provider
 
 function App() {
   return (
-    <GestureHandlerRootView style={styles.container}>
-      <Authenticator.Provider>
-        <Authenticator>
-          <AppContent />
-        </Authenticator>
-      </Authenticator.Provider>
-    </GestureHandlerRootView>
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={styles.container}>
+        <Authenticator.Provider>
+          <UserProvider>
+            <PremiseProvider>
+              <StatusBar barStyle="light-content" />
+              <AppNavigator />
+            </PremiseProvider>
+          </UserProvider>
+        </Authenticator.Provider>
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }
 

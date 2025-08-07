@@ -1,100 +1,118 @@
 /**
  * src/navigation/AppNavigator.tsx
  *
- * The root navigator for the application. It sets up the main
- * bottom tab navigator that holds all the primary screens.
+ * --- UPDATED to handle the new setup flow ---
+ * This component now uses the UserContext to check if an authenticated
+ * user has completed setup. If not, it routes them to the HardwareSetupScreen.
  */
 import React from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { NavigationContainer, getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
+import { useAuthenticator } from '@aws-amplify/ui-react-native';
 import { Home, Settings } from 'lucide-react-native';
 
-import { COLORS } from 'constants/colors';
-import type { AppTabParamList, SettingsStackParamList } from 'navigation/types';
+import { COLORS } from '../constants/colors';
+import { useUser } from '../context/UserContext';
+import type { AppTabParamList, SettingsStackParamList, AuthStackParamList, SetupStackParamList } from './types';
 
-// Import the screens
-import DashboardScreen from 'screens/DashboardScreen';
-import SettingsScreen from 'screens/SettingsScreen';
-import ManualSwitchesScreen from 'screens/ManualSwitchesScreen';
-import ProfilesScreen from 'screens/ProfilesScreen';
-import ProfileDetailScreen from 'screens/ProfileDetailScreen';
-import UserSignUpScreen from 'screens/UserSignUpScreen';
+// Import all screens
+import DashboardScreen from '../screens/DashboardScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import ManualSwitchesScreen from '../screens/ManualSwitchesScreen';
+import ProfilesScreen from '../screens/ProfilesScreen';
+import ProfileDetailScreen from '../screens/ProfileDetailScreen';
+import WaterDemandProfilesScreen from '../screens/WaterDemandProfilesScreen';
+import WaterDemandDetailScreen from '../screens/WaterDemandDetailScreen';
+import ManageUsersScreen from '../screens/ManageUsersScreen';
+import UserSignUpScreen from '../screens/UserSignUpScreen';
+import SignInScreen from '../screens/SignInScreen';
+import ConfirmSignUpScreen from '../screens/ConfirmSignUpScreen';
+import ResetPasswordScreen from '../screens/ResetPasswordScreen';
+import HardwareSetupScreen from '../screens/HardwareSetupScreen';
 
-
+// --- Define Navigators ---
 const Tab = createBottomTabNavigator<AppTabParamList>();
-const Stack = createStackNavigator<SettingsStackParamList>();
+const SettingsNav = createStackNavigator<SettingsStackParamList>();
+const AuthNav = createStackNavigator<AuthStackParamList>();
+const SetupNav = createStackNavigator<SetupStackParamList>();
 
-// This stack contains all the screens accessible from the settings page
+// --- Stacks ---
 const SettingsStack = () => (
-  <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: { backgroundColor: COLORS.background } }}>
-    <Stack.Screen name="SettingsList" component={SettingsScreen} />
-    <Stack.Screen name="Profiles" component={ProfilesScreen} />
-    <Stack.Screen name="ProfileDetail" component={ProfileDetailScreen} />
-    <Stack.Screen name="SignUp" component={UserSignUpScreen} />
-    <Stack.Screen name="ManualSwitches" component={ManualSwitchesScreen} />
-  </Stack.Navigator>
+  <SettingsNav.Navigator screenOptions={{ headerShown: false, cardStyle: { backgroundColor: COLORS.background } }}>
+    <SettingsNav.Screen name="SettingsList" component={SettingsScreen} />
+    <SettingsNav.Screen name="Profiles" component={ProfilesScreen} />
+    <SettingsNav.Screen name="ProfileDetail" component={ProfileDetailScreen} />
+    <SettingsNav.Screen name="WaterDemandProfiles" component={WaterDemandProfilesScreen} />
+    <SettingsNav.Screen name="WaterDemandDetail" component={WaterDemandDetailScreen} />
+    <SettingsNav.Screen name="ManualSwitches" component={ManualSwitchesScreen} />
+    <SettingsNav.Screen name="ManageUsers" component={ManageUsersScreen} />
+  </SettingsNav.Navigator>
 );
 
-
-const AppTabs = () => {
-  return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarStyle: ((route) => {
-            const routeName = getFocusedRouteNameFromRoute(route) ?? '';
-            if (routeName === 'ProfileDetail') {
-              return { display: 'none' };
-            }
-            return {
-              backgroundColor: COLORS.background,
-              borderTopColor: COLORS.border,
-              paddingTop: 8,
-            };
-          })(route),
-        tabBarActiveTintColor: COLORS.cyan,
-        tabBarInactiveTintColor: COLORS.textSecondary,
-        tabBarLabelStyle: {
-          fontSize: 12,
-          marginBottom: 4,
-        }
-      })}
-    >
-      <Tab.Screen
-        name="Dashboard"
-        component={DashboardScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
-        }}
-      />
-      <Tab.Screen
-        name="SettingsStack"
-        component={SettingsStack}
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />,
-        }}
-        // --- UPDATED: Add a listener to reset the stack on tab press ---
-        listeners={({ navigation }) => ({
-          tabPress: (e) => {
-            // Prevent the default action
-            e.preventDefault();
-            // Reset the stack to its initial screen
-            navigation.navigate('SettingsStack', { screen: 'SettingsList' });
-          },
-        })}
-      />
+const AppTabs = () => (
+    <Tab.Navigator screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: COLORS.background, borderTopColor: COLORS.border } }}>
+        <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ tabBarIcon: ({ color, size }) => <Home color={color} size={size} /> }} />
+        <Tab.Screen name="SettingsStack" component={SettingsStack} options={{ title: 'Settings', tabBarIcon: ({ color, size }) => <Settings color={color} size={size} /> }} />
     </Tab.Navigator>
-  );
+);
+
+const AuthStack = () => (
+  <AuthNav.Navigator screenOptions={{ headerShown: false }}>
+    <AuthNav.Screen name="SignIn" component={SignInScreen} />
+    <AuthNav.Screen name="SignUp" component={UserSignUpScreen} />
+    <AuthNav.Screen name="ConfirmSignUp" component={ConfirmSignUpScreen} />
+    <AuthNav.Screen name="ResetPassword" component={ResetPasswordScreen} />
+  </AuthNav.Navigator>
+);
+
+const SetupStack = () => (
+    <SetupNav.Navigator screenOptions={{ headerShown: false }}>
+        <SetupNav.Screen name="HardwareSetup" component={HardwareSetupScreen} />
+    </SetupNav.Navigator>
+);
+
+const LoadingScreen = () => (
+    <View style={styles.centered}>
+        <ActivityIndicator size="large" color={COLORS.cyan} />
+    </View>
+);
+
+const RootNavigator = () => {
+    const { authStatus } = useAuthenticator(context => [context.authStatus]);
+    const { isSetupComplete, isLoading } = useUser();
+
+    if (authStatus !== 'authenticated') {
+        return <AuthStack />;
+    }
+
+    if (isLoading) {
+        return <LoadingScreen />;
+    }
+
+    if (isSetupComplete) {
+        return <AppTabs />;
+    } else {
+        return <SetupStack />;
+    }
 };
 
 const AppNavigator = () => {
   return (
     <NavigationContainer>
-      <AppTabs />
+      <RootNavigator />
     </NavigationContainer>
   );
 };
+
+const styles = StyleSheet.create({
+    centered: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.background,
+    },
+});
 
 export default AppNavigator;

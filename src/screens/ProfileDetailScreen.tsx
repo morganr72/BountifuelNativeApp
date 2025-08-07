@@ -1,24 +1,32 @@
 /**
  * src/screens/ProfileDetailScreen.tsx
  *
- * Screen for editing a single temperature profile.
- * Enforces landscape orientation.
+ * --- FIX: Hide status bar and add padding for camera cutout (notch). ---
+ * --- FIX: Improved landscape layout to give more space to the chart. ---
+ * --- FIX: Removed manual paddingTop to fix landscape alignment on Android. ---
+ * --- FIX: Added manual orientation cleanup to resolve race condition. ---
+ * --- FIX: Added boundary checks to prevent crash on block editing. ---
+ * --- FIX: Removed unnecessary setTimeout from chart rendering. ---
+ * --- UPDATE: Centralized API endpoint usage. ---
  */
-import React, { useState, useEffect, useMemo } from 'react';
-import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, TextInput, Dimensions, Platform, StatusBar, ActivityIndicator, useWindowDimensions, Modal, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, TextInput, Platform, StatusBar, ActivityIndicator, useWindowDimensions, Modal, ScrollView, Alert } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Svg, Rect, G, Line, Text as SvgText } from 'react-native-svg';
-import { X, Plus, Minus, AlertTriangle, CheckCircle } from 'lucide-react-native';
+import { X, Plus, Minus, AlertTriangle } from 'lucide-react-native';
+import { v4 as uuidv4 } from 'uuid';
+import Orientation from 'react-native-orientation-locker';
 
-import { COLORS } from 'constants/colors';
-import type { SettingsStackScreenProps, Profile, HalfHourlyRecord } from 'navigation/types';
-import { useOrientation } from 'hooks/useOrientation';
-import { fetchWithAuth } from 'api/fetchwithAuth'; // Import the authenticated fetch utility
+import { COLORS } from '../constants/colors';
+import { API_ENDPOINTS } from '../config/api';
+import type { SettingsStackScreenProps, Profile, HalfHourlyRecord } from '../navigation/types';
+import { useOrientation } from '../hooks/useOrientation';
+import { fetchWithAuth } from '../api/fetchwithAuth';
+import { usePremise } from '../context/PremiseContext';
 
 const ALL_DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const DAY_ABBREVIATIONS: { [key: string]: string } = { 'Monday': 'Mon', 'Tuesday': 'Tue', 'Wednesday': 'Wed', 'Thursday': 'Thu', 'Friday': 'Fri', 'Saturday': 'Sat', 'Sunday': 'Sun' };
-
-
-// --- Reusable Components ---
 
 const DaySelector: React.FC<{ activeDays: Set<string>, onToggleDay: (day: string) => void, disabled?: boolean }> = ({ activeDays, onToggleDay, disabled }) => (
     <View style={styles.daySelectorContainer}>
@@ -33,7 +41,6 @@ const DaySelector: React.FC<{ activeDays: Set<string>, onToggleDay: (day: string
     </View>
 );
 
-// --- Chart and Modal Components ---
 type TempBlock = {
     startIndex: number;
     endIndex: number;
@@ -44,38 +51,32 @@ type TempBlock = {
 const CustomProfileChart: React.FC<{ records: HalfHourlyRecord[], onBlockPress: (block: TempBlock) => void, disabled?: boolean }> = ({ records, onBlockPress, disabled }) => {
     const { width: screenWidth, height: screenHeight } = useWindowDimensions();
     const padding = { top: 20, right: 20, bottom: 30, left: 50 };
-    const chartWidth = screenWidth - 40;
+    const chartWidth = screenWidth - 40; 
     const chartHeight = screenHeight * 0.55;
     const innerWidth = chartWidth - padding.left - padding.right;
     const innerHeight = chartHeight - padding.top - padding.bottom;
     const [tempBlocks, setTempBlocks] = useState<TempBlock[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const blueShades = ['#38bdf8', '#0ea5e9', '#0284c7', '#0369a1', '#075985'];
 
     useEffect(() => {
-        setIsLoading(true);
         if (records.length === 0) {
-            setIsLoading(false);
+            setTempBlocks([]);
             return;
         }
-        const timeoutId = setTimeout(() => {
-            const blocks: TempBlock[] = [];
-            let currentBlock: TempBlock = { startIndex: 0, endIndex: 0, lowTemp: Number(records[0].LowTemp), highTemp: Number(records[0].HighTemp) };
-            for (let i = 1; i < records.length; i++) {
-                const low = Number(records[i].LowTemp);
-                const high = Number(records[i].HighTemp);
-                if (low === currentBlock.lowTemp && high === currentBlock.highTemp) {
-                    currentBlock.endIndex = i;
-                } else {
-                    blocks.push(currentBlock);
-                    currentBlock = { startIndex: i, endIndex: i, lowTemp: low, highTemp: high };
-                }
+        const blocks: TempBlock[] = [];
+        let currentBlock: TempBlock = { startIndex: 0, endIndex: 0, lowTemp: Number(records[0].LowTemp), highTemp: Number(records[0].HighTemp) };
+        for (let i = 1; i < records.length; i++) {
+            const low = Number(records[i].LowTemp);
+            const high = Number(records[i].HighTemp);
+            if (low === currentBlock.lowTemp && high === currentBlock.highTemp) {
+                currentBlock.endIndex = i;
+            } else {
+                blocks.push(currentBlock);
+                currentBlock = { startIndex: i, endIndex: i, lowTemp: low, highTemp: high };
             }
-            blocks.push(currentBlock);
-            setTempBlocks(blocks);
-            setIsLoading(false);
-        }, 10);
-        return () => clearTimeout(timeoutId);
+        }
+        blocks.push(currentBlock);
+        setTempBlocks(blocks);
     }, [records]);
 
     const minTemp = Math.min(...records.map(r => Number(r.LowTemp)));
@@ -88,7 +89,6 @@ const CustomProfileChart: React.FC<{ records: HalfHourlyRecord[], onBlockPress: 
 
     if (innerWidth <= 0 || innerHeight <= 0) return <ActivityIndicator color={COLORS.cyan} />;
     if (yRange <= 0 || !isFinite(yRange)) return <View><Text style={{ color: COLORS.textSecondary }}>Invalid temperature data</Text></View>;
-    if (isLoading) return <ActivityIndicator color={COLORS.cyan} size="large" />;
 
     return (
         <Svg width={chartWidth} height={chartHeight}>
@@ -248,10 +248,11 @@ const EditChunkModal: React.FC<{ visible: boolean, onClose: () => void, onSubmit
     );
 };
 
-// --- Main Screen Component ---
-
 const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> = ({ route, navigation }) => {
   useOrientation('LANDSCAPE');
+  const { currentPremise } = usePremise();
+  // --- FIX: Get safe area insets to handle camera cutouts ---
+  const insets = useSafeAreaInsets();
   const { profile, isNew } = route.params ?? { profile: null, isNew: true };
   const [profileName, setProfileName] = useState('');
   const [originalProfileName, setOriginalProfileName] = useState<string | null>(null);
@@ -267,6 +268,24 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [originalProfileJSON, setOriginalProfileJSON] = useState<string | null>(null);
+
+  // --- FIX: Hide status bar on focus, show on blur ---
+  useFocusEffect(
+    useCallback(() => {
+      StatusBar.setHidden(true, 'slide');
+      return () => {
+        StatusBar.setHidden(false, 'slide');
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      Orientation.lockToPortrait();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
 
   useEffect(() => {
     const records = isNew ? Array.from({ length: 48 }, (_, i) => ({ FromTime: `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 === 0 ? '00' : '30'}`, LowTemp: '18', HighTemp: '21' })) : profile?.HalfHourlyRecords || [];
@@ -291,24 +310,6 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
   }, [profileName, activeDays, halfHourlyRecords, originalProfileJSON]);
 
   const isDefault = !isNew && profile?.PriorityName?.includes('Default');
-
-  const tempBlocks = useMemo<TempBlock[]>(() => {
-    if (halfHourlyRecords.length === 0) return [];
-    const blocks: TempBlock[] = [];
-    let currentBlock: TempBlock = { startIndex: 0, endIndex: 0, lowTemp: Number(halfHourlyRecords[0].LowTemp), highTemp: Number(halfHourlyRecords[0].HighTemp) };
-    for (let i = 1; i < halfHourlyRecords.length; i++) {
-        const low = Number(halfHourlyRecords[i].LowTemp);
-        const high = Number(halfHourlyRecords[i].HighTemp);
-        if (low === currentBlock.lowTemp && high === currentBlock.highTemp) {
-            currentBlock.endIndex = i;
-        } else {
-            blocks.push(currentBlock);
-            currentBlock = { startIndex: i, endIndex: i, lowTemp: low, highTemp: high };
-        }
-    }
-    blocks.push(currentBlock);
-    return blocks;
-  }, [halfHourlyRecords]);
 
   const handleBlockPress = (block: TempBlock) => {
     setSelectedBlock(block);
@@ -336,14 +337,14 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
     setHalfHourlyRecords(currentRecords => {
         const newRecords = [...currentRecords];
 
-        if (selectedBlock) { // Only do gap filling if we are editing an existing block
-            if (newStartIndex > originalStartIndex) {
+        if (selectedBlock) {
+            if (newStartIndex > originalStartIndex && originalStartIndex > 0) {
                 const precedingBlockTemp = newRecords[originalStartIndex - 1];
                 for (let i = originalStartIndex; i < newStartIndex; i++) {
                     newRecords[i] = { ...newRecords[i], LowTemp: precedingBlockTemp.LowTemp, HighTemp: precedingBlockTemp.HighTemp };
                 }
             }
-            if (newEndIndex < originalEndIndex) {
+            if (newEndIndex < originalEndIndex && originalEndIndex < newRecords.length - 1) {
                 const nextBlockTemp = newRecords[originalEndIndex + 1];
                 for (let i = newEndIndex + 1; i <= originalEndIndex; i++) {
                     newRecords[i] = { ...newRecords[i], LowTemp: nextBlockTemp.LowTemp, HighTemp: nextBlockTemp.HighTemp };
@@ -379,10 +380,15 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
   };
 
   const handleSaveProfile = async () => {
+    if (!currentPremise) {
+        Alert.alert("Error", "No premise selected.");
+        return;
+    }
     setIsSaving(true);
     try {
         const payload = {
-            profileKey: isNew ? crypto.randomUUID() : profile?.ProfileKey,
+            controllerId: currentPremise.Controller,
+            profileKey: isNew ? uuidv4() : profile?.ProfileKey,
             priorityNum: isNew ? 99 : profile?.PriorityNum,
             profileName,
             originalProfileName: isNew ? null : originalProfileName,
@@ -391,7 +397,7 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
             activeDays: Array.from(activeDays),
             halfHourlyRecords
         };
-        const response = await fetchWithAuth('https://rcm4tg6vng.execute-api.eu-west-2.amazonaws.com/default/TempProfileUpdateAPIv2', { method: 'POST', body: JSON.stringify(payload) });
+        const response = await fetchWithAuth(API_ENDPOINTS.updateTempProfile, { method: 'POST', body: JSON.stringify(payload) });
         if (!response.ok) throw new Error('Failed to save profile.');
         navigation.goBack();
     } catch (error: any) {
@@ -402,10 +408,19 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
   };
 
   const confirmDeleteProfile = async () => {
+    if (!currentPremise || !profile) {
+        Alert.alert("Error", "No premise or profile selected.");
+        return;
+    }
     setIsDeleteModalVisible(false);
     setIsSaving(true);
     try {
-        const response = await fetchWithAuth('https://fa2tbi6j76.execute-api.eu-west-2.amazonaws.com/default/TempProfileDeleteAPIv2', { method: 'POST', body: JSON.stringify({ profileKey: profile?.ProfileKey, profileName: profile?.PriorityName }) });
+        const payload = {
+            controllerId: currentPremise.Controller,
+            profileKey: profile.ProfileKey, 
+            profileName: profile.PriorityName
+        };
+        const response = await fetchWithAuth(API_ENDPOINTS.deleteTempProfile, { method: 'POST', body: JSON.stringify(payload) });
         if (!response.ok) throw new Error('Failed to delete profile.');
         navigation.goBack();
     } catch (error: any) {
@@ -438,43 +453,66 @@ const ProfileDetailScreen: React.FC<SettingsStackScreenProps<'ProfileDetail'>> =
         <ConfirmationModal visible={isDiscardModalVisible} onClose={() => setIsDiscardModalVisible(false)} onConfirm={() => navigation.goBack()} title="Discard Changes" message="You have unsaved changes. Are you sure you want to leave?" />
         <EditChunkModal visible={isModalVisible} onClose={() => setIsModalVisible(false)} onSubmit={handleModalSubmit} onDelete={handleModalDelete} block={selectedBlock} isNew={isNewPeriod} onError={showError} isFirstChunk={isFirstChunk} isLastChunk={isLastChunk} disabled={isDefault} />
         
-        <View style={styles.header}>
-            <View style={styles.headerLeft}>
-                <TouchableOpacity onPress={handleAttemptBack} style={styles.backButton}><X color={COLORS.text} size={30} /></TouchableOpacity>
-                <TextInput 
-                    value={profileName} 
-                    onChangeText={setProfileName} 
-                    style={styles.titleInput} 
-                    editable={!isDefault} 
-                    placeholder="Profile Name"
-                    placeholderTextColor={COLORS.textSecondary}
-                />
+        {/* --- FIX: Apply left inset padding to account for camera cutout --- */}
+        <View style={[styles.mainContent, { paddingLeft: insets.left + 20, paddingRight: insets.right + 20 }]}>
+            <View style={styles.header}>
+                <View style={styles.headerLeft}>
+                    <TouchableOpacity onPress={handleAttemptBack} style={styles.backButton}><X color={COLORS.text} size={30} /></TouchableOpacity>
+                    <TextInput 
+                        value={profileName} 
+                        onChangeText={setProfileName} 
+                        style={styles.titleInput} 
+                        editable={!isDefault} 
+                        placeholder="Profile Name"
+                        placeholderTextColor={COLORS.textSecondary}
+                    />
+                </View>
+                <DaySelector activeDays={activeDays} onToggleDay={(day) => { setActiveDays(prev => { const newSet = new Set(prev); if (newSet.has(day)) newSet.delete(day); else newSet.add(day); return newSet; }) }} disabled={isDefault} />
             </View>
-            <DaySelector activeDays={activeDays} onToggleDay={(day) => { setActiveDays(prev => { const newSet = new Set(prev); if (newSet.has(day)) newSet.delete(day); else newSet.add(day); return newSet; }) }} disabled={isDefault} />
-        </View>
-        
-        <View style={styles.chartContainer}>
-            {halfHourlyRecords.length > 0 ? <CustomProfileChart records={halfHourlyRecords} onBlockPress={handleBlockPress} disabled={isDefault} /> : <ActivityIndicator color={COLORS.cyan} size="large" />}
-        </View>
-        
-        {!isDefault && (
-            <View style={styles.bottomControls}>
-                <TouchableOpacity style={styles.button} onPress={handleNewPeriod} disabled={isSaving}><Text style={styles.buttonText}>NEW PERIOD</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.button} onPress={handleSaveProfile} disabled={isSaving || !hasChanges}>
-                    {isSaving ? <ActivityIndicator color={COLORS.text} /> : <Text style={styles.buttonText}>SAVE</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.button, styles.deleteButton]} disabled={isDefault || isNew || isSaving} onPress={() => setIsDeleteModalVisible(true)}><Text style={styles.buttonText}>DELETE</Text></TouchableOpacity>
+            
+            <View style={styles.chartContainer}>
+                {halfHourlyRecords.length > 0 ? <CustomProfileChart records={halfHourlyRecords} onBlockPress={handleBlockPress} disabled={isDefault} /> : <ActivityIndicator color={COLORS.cyan} size="large" />}
             </View>
-        )}
+            
+            {!isDefault && (
+                <View style={styles.bottomControls}>
+                    <TouchableOpacity style={styles.button} onPress={handleNewPeriod} disabled={isSaving}><Text style={styles.buttonText}>NEW PERIOD</Text></TouchableOpacity>
+                    <TouchableOpacity style={styles.button} onPress={handleSaveProfile} disabled={isSaving || !hasChanges}>
+                        {isSaving ? <ActivityIndicator color={COLORS.text} /> : <Text style={styles.buttonText}>SAVE</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.button, styles.deleteButton]} disabled={isDefault || isNew || isSaving} onPress={() => setIsDeleteModalVisible(true)}><Text style={styles.buttonText}>DELETE</Text></TouchableOpacity>
+                </View>
+            )}
+        </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 20, paddingBottom: 10, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, },
-  headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 20, },
-  backButton: { paddingRight: 15, },
+  container: { 
+    flex: 1, 
+    backgroundColor: COLORS.background, 
+  },
+  mainContent: {
+    flex: 1,
+    paddingBottom: 10,
+  },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    paddingTop: 10,
+    marginBottom: 10,
+  },
+  headerLeft: { 
+    flex: 1, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginRight: 20, 
+  },
+  backButton: { 
+    paddingRight: 15, 
+  },
   titleInput: { 
     flex: 1,
     backgroundColor: COLORS.card,
@@ -486,33 +524,164 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     textAlign: 'center',
   },
-  daySelectorContainer: { flexDirection: 'row', },
-  dayButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: COLORS.border, marginHorizontal: 4, },
-  dayButtonActive: { backgroundColor: COLORS.cyan, borderColor: COLORS.cyan },
-  dayButtonText: { color: COLORS.textSecondary },
-  dayButtonTextActive: { color: COLORS.text, fontWeight: 'bold' },
-  chartContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', },
-  bottomControls: { flexDirection: 'row', justifyContent: 'center', paddingTop: 10, },
-  button: { backgroundColor: COLORS.cyan, paddingVertical: 12, paddingHorizontal: 30, borderRadius: 25, marginHorizontal: 10, minWidth: 120, alignItems: 'center' },
-  deleteButton: { backgroundColor: COLORS.red },
-  buttonText: { color: COLORS.text, fontWeight: 'bold', fontSize: 16 },
-  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.75)', flexDirection: 'row' },
-  modalContent: { backgroundColor: COLORS.background, borderRadius: 20, padding: 15, width: '70%', maxHeight: '95%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
-  modalScrollView: { flexGrow: 1, justifyContent: 'center' },
-  modalSection: { marginVertical: 10 },
-  modalRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  modalSeparator: { color: COLORS.text, fontSize: 30, fontWeight: 'bold', marginHorizontal: 5, textAlignVertical: 'center', includeFontPadding: false },
-  modalButtonRow: { flexDirection: 'row', justifyContent: 'space-around', paddingTop: 15, borderTopWidth: 1, borderTopColor: COLORS.border },
-  modalSideButtonContainer: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 15 },
-  modalSideButton: { width: 120, height: 60, justifyContent: 'center', alignItems: 'center', marginVertical: 10 },
-  numberInputContainer: { alignItems: 'center', marginHorizontal: 3 },
-  numberInputButton: { padding: 8 },
-  numberDisplay: { width: 50, height: 50, borderRadius: 25, borderWidth: 2, borderColor: COLORS.border, justifyContent: 'center', alignItems: 'center', marginVertical: 4 },
-  numberDisplayText: { color: COLORS.text, fontSize: 18, fontWeight: 'bold' },
-  errorModalContent: { backgroundColor: COLORS.background, borderRadius: 20, padding: 20, width: '80%', maxWidth: 400, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
-  errorModalTitle: { color: COLORS.orange, fontSize: 22, fontWeight: 'bold', marginTop: 10, marginBottom: 5 },
-  errorModalMessage: { color: COLORS.text, fontSize: 16, textAlign: 'center', marginBottom: 20 },
-  disabledInput: { opacity: 0.5 },
+  daySelectorContainer: { 
+    flexDirection: 'row', 
+  },
+  dayButton: { 
+    paddingVertical: 8, 
+    paddingHorizontal: 12, 
+    borderRadius: 20, 
+    borderWidth: 1, 
+    borderColor: COLORS.border, 
+    marginHorizontal: 4, 
+  },
+  dayButtonActive: { 
+    backgroundColor: COLORS.cyan, 
+    borderColor: COLORS.cyan 
+  },
+  dayButtonText: { 
+    color: COLORS.textSecondary 
+  },
+  dayButtonTextActive: { 
+    color: COLORS.text, 
+    fontWeight: 'bold' 
+  },
+  chartContainer: { 
+    flex: 1,
+    justifyContent: 'center', 
+    alignItems: 'center', 
+  },
+  bottomControls: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    paddingVertical: 10,
+  },
+  button: { 
+    backgroundColor: COLORS.cyan, 
+    paddingVertical: 12, 
+    paddingHorizontal: 30, 
+    borderRadius: 25, 
+    marginHorizontal: 10, 
+    minWidth: 120, 
+    alignItems: 'center' 
+  },
+  deleteButton: { 
+    backgroundColor: COLORS.red 
+  },
+  buttonText: { 
+    color: COLORS.text, 
+    fontWeight: 'bold', 
+    fontSize: 16 
+  },
+  modalContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(0,0,0,0.75)', 
+    flexDirection: 'row' 
+  },
+  modalContent: { 
+    backgroundColor: COLORS.background, 
+    borderRadius: 20, 
+    padding: 15, 
+    width: '70%', 
+    maxHeight: '95%', 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.25, 
+    shadowRadius: 4, 
+    elevation: 5 
+  },
+  modalScrollView: { 
+    flexGrow: 1, 
+    justifyContent: 'center' 
+  },
+  modalSection: { 
+    marginVertical: 10 
+  },
+  modalRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  modalSeparator: { 
+    color: COLORS.text, 
+    fontSize: 30, 
+    fontWeight: 'bold', 
+    marginHorizontal: 5, 
+    textAlignVertical: 'center', 
+    includeFontPadding: false 
+  },
+  modalButtonRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-around', 
+    paddingTop: 15, 
+    borderTopWidth: 1, 
+    borderTopColor: COLORS.border 
+  },
+  modalSideButtonContainer: { 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    paddingHorizontal: 15 
+  },
+  modalSideButton: { 
+    width: 120, 
+    height: 60, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginVertical: 10 
+  },
+  numberInputContainer: { 
+    alignItems: 'center', 
+    marginHorizontal: 3 
+  },
+  numberInputButton: { 
+    padding: 8 
+  },
+  numberDisplay: { 
+    width: 50, 
+    height: 50, 
+    borderRadius: 25, 
+    borderWidth: 2, 
+    borderColor: COLORS.border, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginVertical: 4 
+  },
+  numberDisplayText: { 
+    color: COLORS.text, 
+    fontSize: 18, 
+    fontWeight: 'bold' 
+  },
+  errorModalContent: { 
+    backgroundColor: COLORS.background, 
+    borderRadius: 20, 
+    padding: 20, 
+    width: '80%', 
+    maxWidth: 400, 
+    alignItems: 'center', 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.25, 
+    shadowRadius: 4, 
+    elevation: 5 
+  },
+  errorModalTitle: { 
+    color: COLORS.orange, 
+    fontSize: 22, 
+    fontWeight: 'bold', 
+    marginTop: 10, 
+    marginBottom: 5 
+  },
+  errorModalMessage: { 
+    color: COLORS.text, 
+    fontSize: 16, 
+    textAlign: 'center', 
+    marginBottom: 20 
+  },
+  disabledInput: { 
+    opacity: 0.5 
+  },
 });
 
 export default ProfileDetailScreen;
